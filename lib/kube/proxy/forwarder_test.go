@@ -44,11 +44,11 @@ func (s ForwarderSuite) TestRequestCertificate(c *check.C) {
 	cl, err := newMockCSRClient()
 	c.Assert(err, check.IsNil)
 	f := &Forwarder{
-		ForwarderConfig: ForwarderConfig{
+		cfg: ForwarderConfig{
 			Keygen: testauthority.New(),
-			Client: cl,
+			AuthClient: cl,
 		},
-		Entry: logrus.NewEntry(logrus.New()),
+		log: logrus.NewEntry(logrus.New()),
 	}
 	user, err := services.NewUser("bob")
 	c.Assert(err, check.IsNil)
@@ -94,7 +94,7 @@ func (s ForwarderSuite) TestGetClusterSession(c *check.C) {
 	c.Assert(err, check.IsNil)
 	f := &Forwarder{
 		clusterSessions: clusterSessions,
-		Entry:           logrus.NewEntry(logrus.New()),
+		log:             logrus.NewEntry(logrus.New()),
 	}
 
 	user, err := services.NewUser("bob")
@@ -148,10 +148,10 @@ func TestAuthenticate(t *testing.T) {
 	}
 
 	f := &Forwarder{
-		Entry: logrus.NewEntry(logrus.New()),
-		ForwarderConfig: ForwarderConfig{
+		log: logrus.NewEntry(logrus.New()),
+		cfg: ForwarderConfig{
 			ClusterName: "local",
-			AccessPoint: ap,
+			CachingAuthClient: ap,
 		},
 	}
 
@@ -392,7 +392,7 @@ func TestAuthenticate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			f.Tunnel = tt.tunnel
+			f.cfg.ReverseTunnelSrv = tt.tunnel
 			ap.kubeServices = tt.kubeServices
 			roles, err := services.FromSpec("ops", services.RoleSpecV3{
 				Allow: services.RoleConditions{
@@ -413,7 +413,7 @@ func TestAuthenticate(t *testing.T) {
 			if tt.authzErr {
 				authz.err = trace.AccessDenied("denied!")
 			}
-			f.Auth = authz
+			f.cfg.Authz = authz
 
 			req := &http.Request{
 				Host:       "example.com",
@@ -575,11 +575,11 @@ func (s ForwarderSuite) TestNewClusterSession(c *check.C) {
 	csrClient, err := newMockCSRClient()
 	c.Assert(err, check.IsNil)
 	f := &Forwarder{
-		Entry: logrus.NewEntry(logrus.New()),
-		ForwarderConfig: ForwarderConfig{
+		log: logrus.NewEntry(logrus.New()),
+		cfg: ForwarderConfig{
 			Keygen:      testauthority.New(),
-			Client:      csrClient,
-			AccessPoint: mockAccessPoint{},
+			AuthClient:      csrClient,
+			CachingAuthClient: mockAccessPoint{},
 		},
 		clusterSessions: clusterSessions,
 	}
