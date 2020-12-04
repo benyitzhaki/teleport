@@ -180,7 +180,7 @@ func (s *SessionRegistry) emitSessionJoinEvent(ctx *ServerContext) {
 func (s *SessionRegistry) OpenSession(ch ssh.Channel, req *ssh.Request, ctx *ServerContext) error {
 	session := ctx.getSession()
 	if session != nil {
-		ctx.Infof("Joining existing session %v.", session.id)
+		ctx.Log.Infof("Joining existing session %v.", session.id)
 
 		// Update the in-memory data structure that a party member has joined.
 		_, err := session.join(ch, req, ctx)
@@ -208,7 +208,7 @@ func (s *SessionRegistry) OpenSession(ch ssh.Channel, req *ssh.Request, ctx *Ser
 	}
 	ctx.setSession(sess)
 	s.addSession(sess)
-	ctx.Infof("Creating (interactive) session %v.", sid)
+	ctx.Log.Infof("Creating (interactive) session %v.", sid)
 
 	// Start an interactive session (TTY attached). Close the session if an error
 	// occurs, otherwise it will be closed by the callee.
@@ -231,7 +231,7 @@ func (s *SessionRegistry) OpenExecSession(channel ssh.Channel, req *ssh.Request,
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	ctx.Infof("Creating (exec) session %v.", sessionID)
+	ctx.Log.Infof("Creating (exec) session %v.", sessionID)
 
 	// Start a non-interactive session (TTY attached). Close the session if an error
 	// occurs, otherwise it will be closed by the callee.
@@ -580,9 +580,10 @@ func newSession(id rsession.ID, r *SessionRegistry, ctx *ServerContext) (*sessio
 	}
 
 	sess := &session{
-		log: logrus.WithFields(logrus.Fields{
-			trace.Component: teleport.Component(teleport.ComponentSession, r.srv.Component()),
-		}),
+		log: r.log.WithField(
+			trace.Component,
+			teleport.Component(teleport.ComponentSession, r.srv.Component()),
+		),
 		id:           id,
 		registry:     r,
 		parties:      make(map[rsession.ID]*party),
@@ -690,13 +691,13 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 		ctx.SetTerm(nil)
 	} else {
 		if s.term, err = NewTerminal(ctx); err != nil {
-			ctx.Infof("Unable to allocate new terminal: %v", err)
+			ctx.Log.Infof("Unable to allocate new terminal: %v", err)
 			return trace.Wrap(err)
 		}
 	}
 
 	if err := s.term.Run(); err != nil {
-		ctx.Errorf("Unable to run shell command: %v.", err)
+		ctx.Log.Errorf("Unable to run shell command: %v.", err)
 		return trace.ConvertSystemError(err)
 	}
 	if err := s.addParty(p); err != nil {
@@ -718,7 +719,7 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 	}
 	cgroupID, err := ctx.srv.GetBPF().OpenSession(sessionContext)
 	if err != nil {
-		ctx.Errorf("Failed to open enhanced recording (interactive) session: %v: %v.", s.id, err)
+		ctx.Log.Errorf("Failed to open enhanced recording (interactive) session: %v: %v.", s.id, err)
 		return trace.Wrap(err)
 	}
 
@@ -797,7 +798,7 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 	go func() {
 		result, err := s.term.Wait()
 		if err != nil {
-			ctx.Errorf("Received error waiting for the interactive session %v to finish: %v.", s.id, err)
+			ctx.Log.Errorf("Received error waiting for the interactive session %v to finish: %v.", s.id, err)
 		}
 
 		// wait for copying from the pty to be complete or a timeout before
@@ -813,7 +814,7 @@ func (s *session) startInteractive(ch ssh.Channel, ctx *ServerContext) error {
 		// or running in a recording proxy, this is simply a NOP.
 		err = ctx.srv.GetBPF().CloseSession(sessionContext)
 		if err != nil {
-			ctx.Errorf("Failed to close enhanced recording (interactive) session: %v: %v.", s.id, err)
+			ctx.Log.Errorf("Failed to close enhanced recording (interactive) session: %v: %v.", s.id, err)
 		}
 
 		if result != nil {
@@ -898,7 +899,7 @@ func (s *session) startExec(channel ssh.Channel, ctx *ServerContext) error {
 		sessionStartEvent.ConnectionMetadata.LocalAddr = ctx.ServerConn.LocalAddr().String()
 	}
 	if err := s.recorder.EmitAuditEvent(ctx.srv.Context(), sessionStartEvent); err != nil {
-		ctx.WithError(err).Warn("Failed to emit session start event.")
+		ctx.Log.WithError(err).Warn("Failed to emit session start event.")
 	}
 
 	// Start execution. If the program failed to start, send that result back.
@@ -909,7 +910,7 @@ func (s *session) startExec(channel ssh.Channel, ctx *ServerContext) error {
 		return trace.Wrap(err)
 	}
 	if result != nil {
-		ctx.Debugf("Exec request (%v) result: %v.", ctx.ExecRequest, result)
+		ctx.Log.Debugf("Exec request (%v) result: %v.", ctx.ExecRequest, result)
 		ctx.SendExecResult(*result)
 	}
 
@@ -928,7 +929,7 @@ func (s *session) startExec(channel ssh.Channel, ctx *ServerContext) error {
 	}
 	cgroupID, err := ctx.srv.GetBPF().OpenSession(sessionContext)
 	if err != nil {
-		ctx.Errorf("Failed to open enhanced recording (exec) session: %v: %v.", ctx.ExecRequest.GetCommand(), err)
+		ctx.Log.Errorf("Failed to open enhanced recording (exec) session: %v: %v.", ctx.ExecRequest.GetCommand(), err)
 		return trace.Wrap(err)
 	}
 
@@ -955,7 +956,7 @@ func (s *session) startExec(channel ssh.Channel, ctx *ServerContext) error {
 		// or running in a recording proxy, this is simply a NOP.
 		err = ctx.srv.GetBPF().CloseSession(sessionContext)
 		if err != nil {
-			ctx.Errorf("Failed to close enhanced recording (exec) session: %v: %v.", s.id, err)
+			ctx.Log.Errorf("Failed to close enhanced recording (exec) session: %v: %v.", s.id, err)
 		}
 
 		// Remove the session from the in-memory map.
@@ -992,25 +993,25 @@ func (s *session) startExec(channel ssh.Channel, ctx *ServerContext) error {
 			EndTime:   end,
 		}
 		if err := s.recorder.EmitAuditEvent(ctx.srv.Context(), sessionEndEvent); err != nil {
-			ctx.WithError(err).Warn("Failed to emit session end event.")
+			ctx.Log.WithError(err).Warn("Failed to emit session end event.")
 		}
 
 		// Close recorder to free up associated resources and flush data.
 		if err := s.recorder.Close(ctx.srv.Context()); err != nil {
-			ctx.WithError(err).Warn("Failed to close recorder.")
+			ctx.Log.WithError(err).Warn("Failed to close recorder.")
 		}
 
 		// Close the session.
 		err = s.Close()
 		if err != nil {
-			ctx.Errorf("Failed to close session %v: %v.", s.id, err)
+			ctx.Log.Errorf("Failed to close session %v: %v.", s.id, err)
 		}
 
 		// Remove the session from the backend.
 		if ctx.srv.GetSessionServer() != nil {
 			err := ctx.srv.GetSessionServer().DeleteSession(ctx.srv.GetNamespace(), s.id)
 			if err != nil {
-				ctx.Errorf("Failed to remove active session: %v: %v. "+
+				ctx.Log.Errorf("Failed to remove active session: %v: %v. "+
 					"Access to backend may be degraded, check connectivity to backend.",
 					s.id, err)
 			}
@@ -1070,7 +1071,7 @@ func (s *session) removePartyMember(party *party) {
 // removeParty removes the party from the in-memory map that holds all party
 // members.
 func (s *session) removeParty(p *party) error {
-	p.ctx.Infof("Removing party %v from session %v", p, s.id)
+	p.ctx.Log.Infof("Removing party %v from session %v", p, s.id)
 
 	// Removes participant from in-memory map of party members.
 	s.removePartyMember(p)
@@ -1399,7 +1400,7 @@ func (p *party) Close() (err error) {
 	p.closeOnce.Do(func() {
 		p.log.Infof("Closing party %v", p.id)
 		if err = p.s.registry.leaveSession(p); err != nil {
-			p.ctx.Error(err)
+			p.ctx.Log.WithError(err).Error("Failed to leave session.")
 		}
 		close(p.closeC)
 		close(p.termSizeC)
