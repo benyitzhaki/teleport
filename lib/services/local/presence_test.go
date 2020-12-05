@@ -177,10 +177,12 @@ func TestDatabaseServersCRUD(t *testing.T) {
 	lease, err = presence.UpsertDatabaseServer(ctx, server)
 	require.NoError(t, err)
 	require.Equal(t, &services.KeepAlive{
-		Type:    services.KeepAlive_DATABASE,
-		LeaseID: lease.LeaseID,
-		Name:    server.GetName(),
-		HostID:  server.GetHostID(),
+		Type:      services.KeepAlive_DATABASE,
+		LeaseID:   lease.LeaseID,
+		Name:      server.GetName(),
+		Namespace: server.GetNamespace(),
+		HostID:    server.GetHostID(),
+		Expires:   server.Expiry(),
 	}, lease)
 
 	// Make sure can't delete all with empty namespace.

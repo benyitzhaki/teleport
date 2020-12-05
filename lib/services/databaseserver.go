@@ -41,6 +41,8 @@ type DatabaseServer interface {
 	GetHostID() string
 	// GetStaticLabels returns server static labels.
 	GetStaticLabels() map[string]string
+	// SetStaticLabels sets server static labels.
+	SetStaticLabels(map[string]string)
 	// GetDynamicLabels returns server dynamic labels.
 	GetDynamicLabels() map[string]CommandLabel
 	// SetDynamicLabels sets server dynamic labels.
@@ -69,6 +71,8 @@ type DatabaseServer interface {
 	IsAWS() bool
 	// CheckAndSetDefaults checks and set default values for any missing fields.
 	CheckAndSetDefaults() error
+	// Copy returns a copy of this database server object.
+	Copy() DatabaseServer
 }
 
 // NewDatabaseServerV2 creates a new database server instance.
@@ -180,6 +184,11 @@ func (s *DatabaseServerV2) GetStaticLabels() map[string]string {
 	return s.Metadata.Labels
 }
 
+// SetStaticLabels sets the server static labels.
+func (s *DatabaseServerV2) SetStaticLabels(sl map[string]string) {
+	s.Metadata.Labels = sl
+}
+
 // GetDynamicLabels returns the server dynamic labels.
 func (s *DatabaseServerV2) GetDynamicLabels() map[string]CommandLabel {
 	if s.Spec.DynamicLabels == nil {
@@ -265,6 +274,16 @@ func (s *DatabaseServerV2) CheckAndSetDefaults() error {
 		return trace.BadParameter("database server %q host ID is empty", s.GetName())
 	}
 	return nil
+}
+
+// Copy returns a copy of this database server object.
+func (s *DatabaseServerV2) Copy() DatabaseServer {
+	return &DatabaseServerV2{
+		Kind:     KindDatabaseServer,
+		Version:  V2,
+		Metadata: s.Metadata,
+		Spec:     s.Spec,
+	}
 }
 
 // CompareDatabaseServers returns whether the two provided database servers

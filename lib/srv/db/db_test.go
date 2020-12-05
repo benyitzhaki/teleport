@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib/auth"
@@ -39,8 +40,6 @@ import (
 )
 
 func TestDatabaseAccess(t *testing.T) {
-	utils.InitLoggerForTests(testing.Verbose())
-
 	ctx := context.Background()
 	testCtx := setupTestContext(ctx, t)
 	defer testCtx.Close()
@@ -182,6 +181,7 @@ type testContext struct {
 	mux            *multiplexer.Mux
 	proxyConn      chan (net.Conn)
 	server         *Server
+	dbServer       services.DatabaseServer
 }
 
 // Close closes all resources associated with the test context.
@@ -199,7 +199,10 @@ func (c *testContext) Close() error {
 }
 
 func setupTestContext(ctx context.Context, t *testing.T) *testContext {
+	utils.InitLoggerForTests(testing.Verbose())
+
 	clusterName := "root.example.com"
+	dbServerName := "test"
 	hostID := uuid.New()
 
 	// Create multiplexer.
@@ -240,11 +243,11 @@ func setupTestContext(ctx context.Context, t *testing.T) *testContext {
 	require.NoError(t, err)
 
 	// Fake Postgres server that speaks part of its wire protocol.
-	postgresServer, err := postgres.MakeTestServer(dbAuthClient, "test", "")
+	postgresServer, err := postgres.MakeTestServer(dbAuthClient, dbServerName, "")
 	require.NoError(t, err)
 
 	// Create a database server for the test database service.
-	dbServer := makeDatabaseServer("test", fmt.Sprintf("localhost:%v", postgresServer.Port()), hostID)
+	dbServer := makeDatabaseServer(dbServerName, fmt.Sprintf("localhost:%v", postgresServer.Port()), hostID)
 	_, err = dbAuthClient.UpsertDatabaseServer(ctx, dbServer)
 	require.NoError(t, err)
 
@@ -272,7 +275,7 @@ func setupTestContext(ctx context.Context, t *testing.T) *testContext {
 
 	// Create database service server.
 	server, err := New(ctx, Config{
-		Clock:         clockwork.NewFakeClock(),
+		Clock:         clockwork.NewFakeClockAt(time.Now()),
 		DataDir:       t.TempDir(),
 		AuthClient:    dbAuthClient,
 		AccessPoint:   dbAuthClient,
@@ -281,7 +284,6 @@ func setupTestContext(ctx context.Context, t *testing.T) *testContext {
 		Servers:       []services.DatabaseServer{dbServer},
 		TLSConfig:     tlsConfig,
 		GetRotation:   func(teleport.Role) (*services.Rotation, error) { return &services.Rotation{}, nil },
-		OnHeartbeat:   func(error) {},
 	})
 	require.NoError(t, err)
 
@@ -292,6 +294,7 @@ func setupTestContext(ctx context.Context, t *testing.T) *testContext {
 		proxyConn:      connCh,
 		postgresServer: postgresServer,
 		server:         server,
+		dbServer:       dbServer,
 		tlsServer:      tlsServer,
 		authServer:     tlsServer.Auth(),
 		authClient:     dbAuthClient,
@@ -308,5 +311,11 @@ func makeDatabaseServer(name, uri, hostID string) services.DatabaseServer {
 			Version:  teleport.Version,
 			Hostname: teleport.APIDomain,
 			HostID:   hostID,
+			DynamicLabels: services.LabelsToV2(map[string]services.CommandLabel{
+				"echo": &services.CommandLabelV2{
+					Period:  services.NewDuration(time.Second),
+					Command: []string{"echo", "test"},
+				},
+			}),
 		})
 }

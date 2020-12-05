@@ -1087,10 +1087,12 @@ func (s *PresenceService) UpsertDatabaseServer(ctx context.Context, server servi
 		return &services.KeepAlive{}, nil
 	}
 	return &services.KeepAlive{
-		Type:    services.KeepAlive_DATABASE,
-		LeaseID: lease.ID,
-		HostID:  server.GetHostID(),
-		Name:    server.GetName(),
+		Type:      services.KeepAlive_DATABASE,
+		LeaseID:   lease.ID,
+		Name:      server.GetName(),
+		Namespace: server.GetNamespace(),
+		HostID:    server.GetHostID(),
+		Expires:   server.Expiry(),
 	}, nil
 }
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"sync"
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib/auth"
@@ -96,9 +97,6 @@ func (c *Config) CheckAndSetDefaults() error {
 	if len(c.Servers) == 0 {
 		return trace.BadParameter("missing Servers")
 	}
-	if c.OnHeartbeat == nil {
-		return trace.BadParameter("missing OnHeartbeat")
-	}
 	if c.Credentials == nil {
 		session, err := awssession.NewSessionWithOptions(awssession.Options{
 			SharedConfigState: awssession.SharedConfigEnable,
@@ -128,6 +126,8 @@ type Server struct {
 	heartbeats map[string]*srv.Heartbeat
 	// rdsCACerts contains loaded RDS root certificates for required regions.
 	rdsCACerts map[string][]byte
+	// mu protects access to server infos.
+	mu sync.RWMutex
 	// Entry is used for logging.
 	*logrus.Entry
 }
@@ -221,8 +221,11 @@ func (s *Server) initHeartbeat(ctx context.Context, server services.DatabaseServ
 
 func (s *Server) getServerInfoFunc(server services.DatabaseServer) func() (services.Resource, error) {
 	return func() (services.Resource, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 		// Update dynamic labels.
-		if labels, ok := s.dynamicLabels[server.GetName()]; ok {
+		labels, ok := s.dynamicLabels[server.GetName()]
+		if ok {
 			server.SetDynamicLabels(labels.Get())
 		}
 		// Update CA rotation state.
@@ -234,8 +237,17 @@ func (s *Server) getServerInfoFunc(server services.DatabaseServer) func() (servi
 		}
 		// Update TTL.
 		server.SetTTL(s.Clock, defaults.ServerAnnounceTTL)
-		return server, nil
+		// Make sure to return a new object, because it gets cached by
+		// heartbeat and will always compare as equal otherwise.
+		return server.Copy(), nil
 	}
+}
+
+// getServers returns database servers this service is handling, used in tests.
+func (s *Server) getServers() []services.DatabaseServer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Servers
 }
 
 // Start starts heartbeating the presence of service.Databases that this
